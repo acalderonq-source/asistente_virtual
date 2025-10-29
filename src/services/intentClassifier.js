@@ -9,34 +9,27 @@ function normalize(str) {
 function getIntent(rawMsg) {
   const msg = normalize(rawMsg);
 
-  // crear_recordatorio
-  const crearKeywords = [
-    'recordame','recordar','recorda',
-    'haceme un recordatorio','crea un recordatorio','creame un recordatorio',
-    'poneme alarma','poneme un recordatorio','acordate que','acordate de'
-  ];
+  // === 1) CREAR RECORDATORIO: priorizar verbos AGENDAR/PROGRAMAR/RECORDAR ===
+  // Soporta: "agenda ...", "agendar ...", "agendame ...", "programa ...",
+  // "poneme un recordatorio ...", "recordame ..."
+  const crearRegex =
+    /^(agenda|agend(a|á|ame|ar)|program(a|ar|ame)|pon(e|eme)\s+(un\s+)?recordatorio|recorda(me)?|recordame|haceme\s+un\s+recordatorio|crea(me)?\s+un\s+recordatorio|poneme\s+alarma)/;
   const diasSemanaRegex = /(lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)/;
   const horaRegex = /a las?\s+\d{1,2}(:\d{2})?\s*(am|pm)?/;
 
-  if (
-    crearKeywords.some(k => msg.startsWith(k) || msg.includes(k)) ||
-    (diasSemanaRegex.test(msg) && horaRegex.test(msg))
-  ) {
+  if (crearRegex.test(msg) || (diasSemanaRegex.test(msg) && horaRegex.test(msg))) {
     return 'crear_recordatorio';
   }
 
-  // consultar_agenda
-  const agendaKeywords = [
-    'agenda','pendientes','que tengo','que hay',
-    'tengo algo','que me toca','que queda',
-    'recordatorios','recordatorio',
-    'este mes','esta semana','este fin de semana','para el mes','que hay este mes'
-  ];
-  if (agendaKeywords.some(k => msg.includes(k))) {
+  // === 2) CONSULTAR AGENDA (sustantivo), evitar confundir con el verbo ===
+  // Frases tipo: "mi agenda", "que hay en la agenda", "que tengo hoy/mañana/este mes"
+  const consultaAgendaRegex =
+    /(mi\s+agenda|que\s+(tengo|hay)|pendientes|recordatorios|este\s+mes|esta\s+semana|hoy|mañana|manana|sabado|sábado)\b/;
+  if (consultaAgendaRegex.test(msg)) {
     return 'consultar_agenda';
   }
 
-  // estado_unidad
+  // === 3) ESTADO UNIDAD ===
   const placaRegex = /\b\d{5,6}\b/;
   const estadoKeywords = [
     'puede salir','puede salir a ruta','apta para ruta',
@@ -47,19 +40,18 @@ function getIntent(rawMsg) {
     return 'estado_unidad';
   }
 
-  // buscar_info operativa
+  // === 4) BUSCAR INFO ===
   const infoKeywords = [
-    'decime','dime','mostrame','muestreme','pasame','busque',
-    'buscar info','cual es el estado','quien manejo','quién manejó',
-    'cuantos kilos','cuánto movió','quien llevaba',
-    'que pendiente tengo con','que pendiente hay con',
-    'que info hay de'
+    'decime','dime','mostrame','muestreme','pasame','buscar info',
+    'quien manejo','quién manejó','cuantos kilos','cuánto movió',
+    'que pendiente tengo con','que pendiente hay con','que info hay de',
+    'dekra','quick pass','proveedur'
   ];
   if (infoKeywords.some(k => msg.includes(k))) {
     return 'buscar_info';
   }
 
-  // saludo / trato humano
+  // === 5) SALUDO ===
   const saludoKeywords = [
     'hola','buenos dias','buenas tardes','buenas noches',
     'gracias','ok','estas ahi','me escuchas','todo bien','pura vida'
