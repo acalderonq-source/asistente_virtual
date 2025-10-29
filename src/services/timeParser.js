@@ -1,5 +1,7 @@
+// src/services/timeParser.js
+
 function pad2(n) {
-  return n.toString().padStart(2, '0');
+  return String(n).padStart(2, '0');
 }
 
 const dayMap = {
@@ -15,18 +17,16 @@ const dayMap = {
 };
 
 function findNamedDay(rawMsg) {
-  const lower = rawMsg.toLowerCase();
+  const lower = (rawMsg || '').toLowerCase();
   for (const [name, num] of Object.entries(dayMap)) {
-    if (lower.includes(name)) {
-      return { name, dayNum: num };
-    }
+    if (lower.includes(name)) return { name, dayNum: num };
   }
   return null;
 }
 
 function resolveNamedDayToDate(named, now) {
   const base = new Date(now.getTime());
-  const todayNum = base.getDay();
+  const todayNum = base.getDay(); // 0=domingo
   let diff = named.dayNum - todayNum;
   if (diff < 0) diff += 7;
   const target = new Date(base.getTime());
@@ -35,9 +35,10 @@ function resolveNamedDayToDate(named, now) {
 }
 
 function parseHourFromText(rawMsg) {
-  const lower = rawMsg.toLowerCase();
+  const lower = (rawMsg || '').toLowerCase();
   const match = lower.match(/a las?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
   if (!match) {
+    // por defecto 09:00 si no se especifica
     return { hour: 9, minute: 0, raw: '' };
   }
   let hour = parseInt(match[1], 10);
@@ -54,17 +55,19 @@ function buildDateTimeString(dateObj, hour, minute) {
   const dd = pad2(dateObj.getDate());
   const HH = pad2(hour);
   const MM = pad2(minute);
-  return `${yyyy}-${mm}-${dd} ${HH}:${MM}`;
+  const SS = '00';
+  return `${yyyy}-${mm}-${dd} ${HH}:${MM}:${SS}`; // con segundos
 }
 
-// "mañana", "hoy", "2025-10-30 14:00"
+// "mañana", "hoy", "YYYY-MM-DD HH:MM"
 function parseExplicitOrRelative(rawMsg, now) {
-  const lower = rawMsg.toLowerCase();
+  const lower = (rawMsg || '').toLowerCase();
 
-  const explicit = lower.match(/(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/);
+  // explícito: "2025-10-30 14:00" (segundos opcionales; normalizamos luego)
+  const explicit = lower.match(/(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})(?::\d{2})?/);
   if (explicit) {
-    const fechaStr = `${explicit[1]} ${explicit[2]}`;
-    return { mode: 'explicit', fechaStr };
+    const fechaStr = `${explicit[1]} ${explicit[2]}:00`;
+    return { mode: 'explicit', fechaStr, consumedWord: '', consumedHourWord: '' };
   }
 
   let base = new Date(now.getTime());
@@ -75,7 +78,7 @@ function parseExplicitOrRelative(rawMsg, now) {
   } else if (lower.includes('hoy')) {
     consumedWord = 'hoy';
   } else {
-    return { mode: null, fechaStr: null, consumedWord: '' };
+    return { mode: null, fechaStr: null, consumedWord: '', consumedHourWord: '' };
   }
 
   const { hour, minute, raw: hourRaw } = parseHourFromText(rawMsg);
@@ -90,7 +93,7 @@ function parseExplicitOrRelative(rawMsg, now) {
 }
 
 function extractAgendaRange(rawMsg, now) {
-  const lower = rawMsg.toLowerCase();
+  const lower = (rawMsg || '').toLowerCase();
   let start, end;
 
   if (lower.includes('este mes')) {
@@ -113,15 +116,11 @@ function extractAgendaRange(rawMsg, now) {
     const named = findNamedDay(rawMsg);
     if (named) {
       const d = resolveNamedDayToDate(named, now);
-      start = d;
-      end   = d;
+      start = d; end = d;
     }
   }
 
-  if (!start) {
-    start = new Date(now);
-    end   = new Date(now);
-  }
+  if (!start) { start = new Date(now); end = new Date(now); }
 
   const y1 = start.getFullYear();
   const m1 = pad2(start.getMonth() + 1);
@@ -130,15 +129,10 @@ function extractAgendaRange(rawMsg, now) {
   const m2 = pad2(end.getMonth() + 1);
   const d2 = pad2(end.getDate());
 
-  return {
-    startYMD: `${y1}-${m1}-${d1}`,
-    endYMD:   `${y2}-${m2}-${d2}`,
-  };
+  return { startYMD: `${y1}-${m1}-${d1}`, endYMD: `${y2}-${m2}-${d2}` };
 }
 
-// convierte frases tipo
-// "miercoles tengo reunion de ventas a las 9am"
-// en { fechaStr, textoRecordatorio }
+// "miercoles tengo reunion ... a las 9am" -> fecha + texto
 function parseReminderNatural(rawMsg, now) {
   const named = findNamedDay(rawMsg);
   const { hour, minute, raw: hourChunk } = parseHourFromText(rawMsg);
@@ -158,16 +152,14 @@ function parseReminderNatural(rawMsg, now) {
     targetDate.getMinutes()
   );
 
-  let textoRecordatorio = rawMsg
+  let textoRecordatorio = (rawMsg || '')
     .replace(hourChunk, '')
     .replace(/tengo/gi, '')
     .replace(/a las/gi, '')
     .replace(/hoy|mañana|manana|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo/gi, '')
     .trim();
 
-  if (!textoRecordatorio) {
-    textoRecordatorio = 'Recordatorio';
-  }
+  if (!textoRecordatorio) textoRecordatorio = 'Recordatorio';
 
   return { fechaStr, textoRecordatorio };
 }
