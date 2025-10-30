@@ -3,56 +3,26 @@ const { handleUserMessage } = require('./messageBrain');
 const reminderService = require('./reminderService');
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
-const allowedChatId = process.env.TELEGRAM_CHAT_ID;
+const allowedChatIds = (process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
 
 let bot = null;
-let started = false; // <-- evita doble launch
+let started = false;
 
 async function notify(text) {
-  if (!bot || !allowedChatId) {
-    console.warn('Telegram no configurado. Mensaje sería:', text);
+  if (!bot || !allowedChatIds.length) {
+    console.warn('Telegram no configurado o sin chats. Mensaje sería:', text);
     return;
   }
-  try {
-    await bot.telegram.sendMessage(allowedChatId, text);
-  } catch (err) {
-    console.error('Error enviando Telegram:', err.message);
-  }
-}
-
-async function handleQuickReplies(userMsg) {
-  const msg = (userMsg || '').toLowerCase().trim();
-
-  // eliminar por id o texto
-  if (msg.startsWith('elimina') || msg.startsWith('eliminar') || msg.startsWith('borra') || msg.startsWith('borrar')) {
-    const idMatch = msg.match(/(\d+)/);
-    if (idMatch) {
-      await reminderService.deleteReminderById(idMatch[1]);
-      return `Listo. Eliminé el recordatorio #${idMatch[1]}.`;
+  for (const chatId of allowedChatIds) {
+    try {
+      await bot.telegram.sendMessage(chatId, text);
+    } catch (err) {
+      console.error('Error enviando a', chatId, err.message);
     }
-    const fragment = msg.split(' ').slice(1).join(' ').trim();
-    if (!fragment) return 'Decime qué recordatorio querés borrar.';
-    const found = await reminderService.findReminderByTextFragment(fragment);
-    if (!found) return 'No encontré nada con esa descripción.';
-    await reminderService.deleteReminderById(found.id);
-    return `Listo. Eliminé el recordatorio #${found.id} (${found.mensaje}).`;
   }
-
-  // si / no
-  if (['si','sí','ya','listo','hecho'].includes(msg)) {
-    const last = await reminderService.getLastSentNotAnswered();
-    if (!last) return 'No tengo nada pendiente para marcar como hecho.';
-    await reminderService.markAsCompleted(last.id);
-    return `Perfecto ✅ Quedó marcado como realizado (#${last.id}: ${last.mensaje}).`;
-  }
-  if (['no','todavia','todavía','aun','aún'].includes(msg)) {
-    const last = await reminderService.getLastSentNotAnswered();
-    if (!last) return 'No tengo nada pendiente para marcar como NO hecho.';
-    await reminderService.markAsNotCompleted(last.id);
-    return `Ok, lo dejo pendiente (#${last.id}: ${last.mensaje}).`;
-  }
-
-  return null;
 }
 
 async function startListener() {
@@ -60,25 +30,19 @@ async function startListener() {
     console.warn('Sin TELEGRAM_BOT_TOKEN.');
     return;
   }
-  if (started) {
-    console.warn('Listener Telegram ya iniciado. (ignorado)');
-    return;
-  }
+  if (started) return;
   started = true;
 
   bot = new Telegraf(botToken);
 
   bot.on('text', async (ctx) => {
     const fromChat = ctx.chat.id.toString();
-    const rawMsg = ctx.message.text || '';
-
-    if (allowedChatId && fromChat !== allowedChatId) {
+    if (allowedChatIds.length && !allowedChatIds.includes(fromChat)) {
       return ctx.reply('No estoy autorizado para este chat.');
     }
-    try {
-      const quick = await handleQuickReplies(rawMsg);
-      if (quick) return ctx.reply(quick);
 
+    try {
+      const rawMsg = ctx.message.text || '';
       const respuesta = await handleUserMessage(rawMsg);
       return ctx.reply(respuesta);
     } catch (err) {
@@ -87,15 +51,14 @@ async function startListener() {
     }
   });
 
-  // Lanzar polling con manejo explícito del 409 (otra instancia)
   try {
     await bot.launch();
   } catch (err) {
     if (err?.response?.error_code === 409) {
-      console.warn('Otro proceso ya está haciendo polling. Esta instancia NO lanzará bot.launch().');
-      return; // no re-lanzar, mantené el servidor vivo
+      console.warn('Otra instancia ya está haciendo polling. Esta no lanza.');
+      return;
     }
-    throw err; // otros errores sí deben salir
+    throw err;
   }
 
   process.once('SIGINT',  () => bot.stop('SIGINT'));
